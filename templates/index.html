@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crypto Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { font-family: Arial; margin: 0; padding: 0; transition: background 0.3s, color 0.3s; }
+  .dark { background: #121212; color: #fff; }
+  .container { padding: 20px; max-width: 1200px; margin: auto; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ccc; }
+  th { cursor: pointer; user-select: none; }
+  .coin-img { width: 24px; height: 24px; vertical-align: middle; margin-right: 8px; }
+  .toggle-btn { position: fixed; top: 10px; right: 10px; padding: 10px; cursor: pointer; font-size: 20px; }
+  .filters { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .filters input { padding: 5px; }
+  .search-box { flex: 1; min-width: 200px; }
+  /* Modal popup */
+  .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+           background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; }
+  .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 80%; max-width: 900px; }
+  .dark .modal-content { background: #222; color: #fff; }
+  .close-btn { float: right; cursor: pointer; font-size: 20px; }
+  @media (max-width: 768px) {
+    .modal-content { width: 95%; height: 70%; }
+    #popupChart { width: 100% !important; height: 100% !important; }
+  }
+  .sort-icon { margin-left: 5px; font-size: 12px; color: gray; }
+  .active-sort { color: #007bff; }
+
+  /* ✅ Hover effect for table rows */
+  tbody tr {
+    transition: background 0.2s ease, transform 0.1s ease;
+    cursor: pointer;
+  }
+  tbody tr:hover {
+    background: rgba(0, 123, 255, 0.1);
+    transform: scale(1.01);
+  }
+  .dark tbody tr:hover {
+    background: rgba(0, 123, 255, 0.2);
+  }
+</style>
+
+</head>
+<body>
+<div class="toggle-btn" id="themeToggle">🌙</div>
+<div class="container">
+  <h1>Crypto Dashboard</h1>
+
+  <!-- Filters -->
+  <div class="filters">
+    <input type="text" id="searchInput" class="search-box" placeholder="Search by coin name or symbol...">
+    <input type="number" id="minPrice" placeholder="Min Price">
+    <input type="number" id="maxPrice" placeholder="Max Price">
+    <button onclick="applyFilters()">Apply</button>
+  </div>
+
+  <table id="coins-table">
+    <thead>
+      <tr>
+        <th onclick="sortTable(0)">Coin <span id="sortIcon0" class="sort-icon"></span></th>
+        <th onclick="sortTable(1)">Price (USDT) <span id="sortIcon1" class="sort-icon"></span></th>
+        <th onclick="sortTable(2)">24h % <span id="sortIcon2" class="sort-icon"></span></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- Modal for detailed chart -->
+<div id="chartModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" onclick="closeModal()">&times;</span>
+    <canvas id="popupChart"></canvas>
+  </div>
+</div>
+
+<script>
+const tableBody = document.querySelector('#coins-table tbody');
+let allCoins = [];
+let filteredCoins = [];
+let sortOrder = { col: null, asc: true };
+let popupChart;
+
+// Fetch coins
+function fetchCoins() {
+  fetch('/api/coins')
+    .then(res => res.json())
+    .then(data => {
+      allCoins = data;
+      filteredCoins = data;
+      renderTable(filteredCoins);
+    });
+}
+
+// Render table
+function renderTable(coins) {
+  tableBody.innerHTML = '';
+  coins.forEach(coin => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td><img src="${coin.image}" class="coin-img">${coin.name} (${coin.symbol.toUpperCase()})</td>
+      <td>${coin.current_price}</td>
+      <td style="color:${coin.price_change_percentage_24h >= 0 ? 'green' : 'red'}">
+        ${coin.price_change_percentage_24h.toFixed(2)}%
+      </td>
+    `;
+    row.addEventListener('click', () => openModal(coin.id, coin.name));
+    tableBody.appendChild(row);
+  });
+}
+
+// Sorting with arrows
+function sortTable(colIndex) {
+  const keyMap = { 0: 'name', 1: 'current_price', 2: 'price_change_percentage_24h' };
+  const key = keyMap[colIndex];
+
+  if (sortOrder.col === colIndex) {
+    sortOrder.asc = !sortOrder.asc;
+  } else {
+    sortOrder.col = colIndex;
+    sortOrder.asc = true;
+  }
+
+  // Clear icons
+  document.querySelectorAll(".sort-icon").forEach(span => {
+    span.textContent = "";
+    span.classList.remove("active-sort");
+  });
+
+  // Set active arrow
+  const icon = document.getElementById(`sortIcon${colIndex}`);
+  icon.textContent = sortOrder.asc ? "▲" : "▼";
+  icon.classList.add("active-sort");
+
+  filteredCoins.sort((a, b) => {
+    if (a[key] < b[key]) return sortOrder.asc ? -1 : 1;
+    if (a[key] > b[key]) return sortOrder.asc ? 1 : -1;
+    return 0;
+  });
+
+  renderTable(filteredCoins);
+}
+
+// Filters (price + search)
+function applyFilters() {
+  const min = parseFloat(document.getElementById('minPrice').value) || -Infinity;
+  const max = parseFloat(document.getElementById('maxPrice').value) || Infinity;
+  const search = document.getElementById('searchInput').value.toLowerCase();
+
+  filteredCoins = allCoins.filter(c =>
+    c.current_price >= min &&
+    c.current_price <= max &&
+    (c.name.toLowerCase().includes(search) || c.symbol.toLowerCase().includes(search))
+  );
+  renderTable(filteredCoins);
+}
+
+// Live search
+document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+// Modal with chart
+function openModal(coinId, coinName) {
+  document.getElementById('chartModal').style.display = 'flex';
+  fetch(`/api/coin/${coinId}/chart`)
+    .then(res => res.json())
+    .then(data => {
+      const labels = data.prices.map(p => new Date(p[0]).toLocaleDateString());
+      const prices = data.prices.map(p => p[1]);
+      if (popupChart) popupChart.destroy();
+      popupChart = new Chart(document.getElementById('popupChart').getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: `${coinName} Price (USDT)`,
+            data: prices,
+            borderColor: '#007bff',
+            backgroundColor: 'rgba(0,123,255,0.2)',
+            tension: 0.3
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } }
+        }
+      });
+    });
+}
+function closeModal() {
+  document.getElementById('chartModal').style.display = 'none';
+}
+
+// Dark/Light toggle with sun & moon
+const themeToggle = document.getElementById('themeToggle');
+themeToggle.addEventListener('click', () => {
+  document.body.classList.toggle('dark');
+  themeToggle.textContent = document.body.classList.contains('dark') ? "🌞" : "🌙";
+  localStorage.setItem("theme", document.body.classList.contains('dark') ? "dark" : "light");
+});
+
+// Load saved theme
+if (localStorage.getItem("theme") === "dark") {
+  document.body.classList.add("dark");
+  themeToggle.textContent = "🌞";
+}
+
+fetchCoins();
+</script>
+</body>
+</html>
