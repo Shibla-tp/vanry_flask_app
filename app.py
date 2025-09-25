@@ -1,127 +1,81 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, render_template, request
 import requests
-import time, random
+import openai
+import os
 
 app = Flask(__name__)
+
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
 COINGECKO_API = "https://api.coingecko.com/api/v3"
 
-# Placeholder for Vanry/USDT
-VANRY = {
-    "id": "vanry-placeholder",
-    "symbol": "vanry",
-    "name": "Vanry",
-    "current_price": 0.0123,
-    "price_change_percentage_24h": 0.0,
-    "image": "https://via.placeholder.com/32"
-}
+# ---------- ROUTES ----------
 
-# Fallback coins if API fails
-FALLBACK_COINS = [
-    {
-        "id": "bitcoin",
-        "symbol": "btc",
-        "name": "Bitcoin",
-        "current_price": 30000,
-        "price_change_percentage_24h": 0,
-        "image": "https://assets.coingecko.com/coins/images/1/large/bitcoin.png"
-    },
-    {
-        "id": "ethereum",
-        "symbol": "eth",
-        "name": "Ethereum",
-        "current_price": 2000,
-        "price_change_percentage_24h": 0,
-        "image": "https://assets.coingecko.com/coins/images/279/large/ethereum.png"
-    }
-]
-
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/api/coins')
+@app.route("/api/coins")
 def get_coins():
-    coins = []
+    url = f"{COINGECKO_API}/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 50,
+        "page": 1,
+        "sparkline": "false"
+    }
+    response = requests.get(url, params=params)
+    return jsonify(response.json())
+
+@app.route("/api/coin/<coin_id>/chart")
+def get_coin_chart(coin_id):
+    days = request.args.get("days", 30)
+    url = f"{COINGECKO_API}/coins/{coin_id}/market_chart"
+    params = {"vs_currency": "usd", "days": days}
+    response = requests.get(url, params=params)
+    return jsonify(response.json())
+
+@app.route("/api/opinion/<coin_id>")
+def get_coin_opinion(coin_id):
+    """Generate automatic investment opinion using OpenAI"""
     try:
-        params = {
-            'vs_currency': 'usd',   # CoinGecko uses fiat (usd) — we'll display as /USDT
-            'order': 'market_cap_desc',
-            'per_page': 250,
-            'page': 1,
-            'sparkline': 'false'
-        }
-        res = requests.get(f"{COINGECKO_API}/coins/markets", params=params, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        if isinstance(data, list):
-            coins = [c for c in data if isinstance(c, dict)]
+        # Fetch coin data first
+        url = f"{COINGECKO_API}/coins/markets"
+        params = {"vs_currency": "usd", "ids": coin_id}
+        response = requests.get(url, params=params)
+        data = response.json()[0]
+
+        # Build prompt
+        prompt = f"""
+        You are a crypto market analyst. Based on the following data, give a short investment opinion
+        (bullish, bearish, or neutral) with reasoning.
+
+        Coin: {data['name']} ({data['symbol'].upper()})
+        Current Price: ${data['current_price']}
+        24h Change: {data['price_change_percentage_24h']}%
+        Market Cap: ${data['market_cap']}
+        24h Volume: ${data['total_volume']}
+        """
+
+        # Call OpenAI
+        completion = openai.chat.completions.create(
+            model="gpt-4o-mini",  # Or "gpt-3.5-turbo"
+            messages=[
+                {"role": "system", "content": "You are a financial assistant for crypto insights."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,
+            temperature=0.7
+        )
+
+        opinion = completion.choices[0].message.content.strip()
+
+        return jsonify({"coin": data['name'], "opinion": opinion})
+
     except Exception as e:
-        print("CoinGecko API error:", e)
+        return jsonify({"error": str(e)}), 500
 
-    if not coins or len(coins) < 50:
-        existing_ids = {c['id'] for c in coins}
-        for fallback in FALLBACK_COINS:
-            if fallback['id'] not in existing_ids:
-                coins.append(fallback)
 
-    # Add Vanry placeholder at the top
-    coins = [VANRY] + coins
-    return jsonify(coins)
-
-@app.route('/api/search')
-def search_coins():
-    query = request.args.get("q", "").lower()
-    min_price = request.args.get("min_price", type=float)
-    max_price = request.args.get("max_price", type=float)
-
-    try:
-        params = {
-            'vs_currency': 'usd',
-            'order': 'market_cap_desc',
-            'per_page': 250,
-            'page': 1,
-            'sparkline': 'false'
-        }
-        res = requests.get(f"{COINGECKO_API}/coins/markets", params=params, timeout=10)
-        res.raise_for_status()
-        coins = res.json()
-    except Exception as e:
-        print("CoinGecko API error (search):", e)
-        coins = FALLBACK_COINS
-
-    # Apply search filter
-    if query:
-        coins = [c for c in coins if query in c.get("name","").lower() or query in c.get("symbol","").lower()]
-
-    # Apply price filter
-    if min_price is not None:
-        coins = [c for c in coins if c.get("current_price", 0) >= min_price]
-    if max_price is not None:
-        coins = [c for c in coins if c.get("current_price", 0) <= max_price]
-
-    return jsonify(coins)
-
-@app.route('/api/coin/<coin_id>/chart')
-def coin_chart(coin_id):
-    # default days = 30
-    days = int(request.args.get('days', 30))
-    if coin_id == "vanry-placeholder":
-        timestamps = [int(time.time() - i*86400)*1000 for i in reversed(range(days))]
-        prices = [VANRY['current_price'] * (1 + random.uniform(-0.05,0.05)) for _ in range(days)]
-        # return as CoinGecko market_chart would: {"prices":[[ts,price], ...]}
-        return jsonify({"prices": list(zip(timestamps, prices))})
-    
-    try:
-        res = requests.get(f"{COINGECKO_API}/coins/{coin_id}/market_chart", params={
-            'vs_currency': 'usd', 'days': days
-        }, timeout=10)
-        res.raise_for_status()
-        return jsonify(res.json())
-    except Exception as e:
-        print("Coin chart API error:", e)
-        timestamps = [int(time.time() - i*86400)*1000 for i in reversed(range(days))]
-        prices = [30000 * (1 + random.uniform(-0.05,0.05)) for _ in range(days)]
-        return jsonify({"prices": list(zip(timestamps, prices))})
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)

@@ -58,6 +58,18 @@
                background:#f1f5f9; box-shadow:0 6px 18px rgba(2,6,23,.08); cursor:pointer; font-size:18px; }
   .dark .theme-btn { background:#0f1724; color:#fff; box-shadow:none; }
 
+  #modalOpinion {
+    margin-top:14px;
+    padding:12px;
+    border-radius:6px;
+    background:#f8f9fc;
+    font-size:14px;
+    line-height:1.4;
+  }
+  .dark #modalOpinion {
+    background:#141d2c;
+  }
+
   @media (max-width:768px){
     .modal-content {
       width:100%; 
@@ -82,6 +94,9 @@
     }
     h3#modalTitle {
       font-size:16px;
+    }
+    #modalOpinion {
+      font-size:13px;
     }
   }
 </style>
@@ -126,6 +141,7 @@
     </div>
     <canvas id="modalChart" height="260"></canvas>
     <div id="modalInfo" style="margin-top:10px;font-size:14px;"></div>
+    <div id="modalOpinion"><i>Loading AI investment opinion...</i></div>
   </div>
 </div>
 
@@ -222,6 +238,7 @@ function updateSortIcons(activeIndex){
 const modal = document.getElementById('chartModal');
 const modalTitle = document.getElementById('modalTitle');
 const modalInfo = document.getElementById('modalInfo');
+const modalOpinion = document.getElementById('modalOpinion');
 const chartCtx = document.getElementById('modalChart').getContext('2d');
 
 function openModal(coinId, coinName){
@@ -242,6 +259,16 @@ function openModal(coinId, coinName){
   } else {
     modalInfo.innerHTML = '';
   }
+  // fetch AI opinion
+  modalOpinion.innerHTML = "<i>Loading AI investment opinion...</i>";
+  fetch(`/api/opinion/${coinId}`)
+    .then(r=>r.json())
+    .then(d=>{
+      modalOpinion.textContent = d.opinion || "⚠️ No opinion available.";
+    })
+    .catch(e=>{
+      modalOpinion.textContent = "⚠️ Failed to load AI opinion.";
+    });
 }
 document.getElementById('closeModal').addEventListener('click', ()=> modal.style.display = 'none');
 
