@@ -44,9 +44,9 @@ def get_coins():
     coins = []
     try:
         params = {
-            'vs_currency': 'usd',   # must be usd, not usdt
+            'vs_currency': 'usd',   # CoinGecko uses fiat (usd) — we'll display as /USDT
             'order': 'market_cap_desc',
-            'per_page': 250,        # get more results for filtering
+            'per_page': 250,
             'page': 1,
             'sparkline': 'false'
         }
@@ -64,10 +64,10 @@ def get_coins():
             if fallback['id'] not in existing_ids:
                 coins.append(fallback)
 
+    # Add Vanry placeholder at the top
     coins = [VANRY] + coins
     return jsonify(coins)
 
-# 🔎 New Search + Filter route
 @app.route('/api/search')
 def search_coins():
     query = request.args.get("q", "").lower()
@@ -91,7 +91,7 @@ def search_coins():
 
     # Apply search filter
     if query:
-        coins = [c for c in coins if query in c["name"].lower() or query in c["symbol"].lower()]
+        coins = [c for c in coins if query in c.get("name","").lower() or query in c.get("symbol","").lower()]
 
     # Apply price filter
     if min_price is not None:
@@ -103,10 +103,12 @@ def search_coins():
 
 @app.route('/api/coin/<coin_id>/chart')
 def coin_chart(coin_id):
-    days = int(request.args.get('days', 7))
+    # default days = 30
+    days = int(request.args.get('days', 30))
     if coin_id == "vanry-placeholder":
         timestamps = [int(time.time() - i*86400)*1000 for i in reversed(range(days))]
         prices = [VANRY['current_price'] * (1 + random.uniform(-0.05,0.05)) for _ in range(days)]
+        # return as CoinGecko market_chart would: {"prices":[[ts,price], ...]}
         return jsonify({"prices": list(zip(timestamps, prices))})
     
     try:
