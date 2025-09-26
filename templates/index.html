@@ -60,15 +60,48 @@
 
   #modalOpinion {
     margin-top:14px;
-    padding:12px;
-    border-radius:6px;
-    background:#f8f9fc;
-    font-size:14px;
-    line-height:1.4;
   }
-  .dark #modalOpinion {
-    background:#141d2c;
+
+  /* Improved Opinion Block */
+  .opinion-block {
+    background: #f0f4ff;
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: #1a202c;
   }
+  .dark .opinion-block {
+    background: #192a56;
+    color: #e2e8f0;
+  }
+  .opinion-block h4 {
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  #sentimentIcon {
+    font-size: 22px;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  .opinion-block ul {
+    list-style-type: disc;
+    padding-left: 20px;
+  }
+  #refreshOpinionBtn {
+    margin-top: 12px;
+    padding: 8px 14px;
+    background-color: #007bff;
+    border: none;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #refreshOpinionBtn:hover {
+    background-color: #0056b3;
+  }
+
 
   @media (max-width:768px){
     .modal-content {
@@ -94,9 +127,6 @@
     }
     h3#modalTitle {
       font-size:16px;
-    }
-    #modalOpinion {
-      font-size:13px;
     }
   }
 </style>
@@ -141,7 +171,9 @@
     </div>
     <canvas id="modalChart" height="260"></canvas>
     <div id="modalInfo" style="margin-top:10px;font-size:14px;"></div>
-    <div id="modalOpinion"><i>Loading AI investment opinion...</i></div>
+    <div id="modalOpinion">
+      <i>Loading AI investment opinion...</i>
+    </div>
   </div>
 </div>
 
@@ -153,7 +185,6 @@ let curCoinName = '';
 let sortState = { col: null, asc: true };
 let modalChart = null;
 
-// fetch coins (on load)
 async function loadCoins(){
   try{
     const res = await fetch('/api/coins');
@@ -183,7 +214,6 @@ function renderTable(list){
   });
 }
 
-// search/filter
 function applyFilters(){
   const q = (document.getElementById('searchInput').value||'').toLowerCase();
   const min = parseFloat(document.getElementById('minPrice').value) || -Infinity;
@@ -207,7 +237,6 @@ document.getElementById('resetBtn').addEventListener('click', ()=> {
   renderTable(filtered);
 });
 
-// sorting helpers
 function sortTable(colIndex){
   sortState.col = colIndex;
   sortState.asc = (sortState.col === colIndex) ? !sortState.asc : true;
@@ -234,7 +263,6 @@ function updateSortIcons(activeIndex){
   });
 }
 
-// modal + chart
 const modal = document.getElementById('chartModal');
 const modalTitle = document.getElementById('modalTitle');
 const modalInfo = document.getElementById('modalInfo');
@@ -259,12 +287,57 @@ function openModal(coinId, coinName){
   } else {
     modalInfo.innerHTML = '';
   }
-  // fetch AI opinion
-  modalOpinion.innerHTML = "<i>Loading AI investment opinion...</i>";
+  // fetch AI opinion with structured UI
+  modalOpinion.innerHTML = `<div class="opinion-block"><h4><span id="sentimentIcon">➖</span> Loading AI investment opinion...</h4></div>`;
   fetch(`/api/opinion/${coinId}`)
     .then(r=>r.json())
     .then(d=>{
-      modalOpinion.textContent = d.opinion || "⚠️ No opinion available.";
+      if(d.opinion){
+        // Assuming opinion text includes headline "Investment Opinion: X" and reasoning split by lines, parse & style them
+        const text = d.opinion;
+        let sentimentIcon = "➖";
+        if(text.toLowerCase().includes("bullish")) sentimentIcon = "📈";
+        else if(text.toLowerCase().includes("bearish")) sentimentIcon = "📉";
+
+        // Simple parse: split by lines, first line is headline, rest in list
+        const lines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+        const headline = lines[0] || "Investment Opinion";
+        let reasoningHtml = "<ul>";
+        for(let i=1; i<lines.length; i++){
+          reasoningHtml += `<li>${lines[i]}</li>`;
+        }
+        reasoningHtml += "</ul>";
+
+        modalOpinion.innerHTML = `
+          <div class="opinion-block">
+            <h4><span id="sentimentIcon">${sentimentIcon}</span> <strong>${headline}</strong></h4>
+            ${reasoningHtml}
+            <button id="refreshOpinionBtn">Refresh Opinion</button>
+          </div>
+        `;
+
+        document.getElementById('refreshOpinionBtn').addEventListener('click', ()=> {
+          modalOpinion.innerHTML = `<div class="opinion-block"><h4><span id="sentimentIcon">⏳</span> Refreshing AI investment opinion...</h4></div>`;
+          fetch(`/api/opinion/${coinId}`)
+            .then(r=>r.json())
+            .then(d => {
+              // Repeat parsing and displaying logic here or call openModal again
+              if(d.opinion){
+                // Recursion guard: careful to avoid infinite loop
+                modalOpinion.textContent = "Please close and reopen modal for updated opinion.";
+              } else {
+                modalOpinion.textContent = "⚠️ No opinion available.";
+              }
+            })
+            .catch(e => {
+              modalOpinion.textContent = "⚠️ Failed to refresh AI opinion.";
+              console.error(e);
+            });
+        });
+
+      } else {
+        modalOpinion.textContent = "⚠️ No opinion available.";
+      }
     })
     .catch(e=>{
       modalOpinion.textContent = "⚠️ Failed to load AI opinion.";
@@ -316,7 +389,6 @@ themeBtn.addEventListener('click', ()=>{
   localStorage.setItem('theme', isDark ? 'dark' : 'light');
 });
 
-// init
 loadCoins();
 </script>
 </body>
