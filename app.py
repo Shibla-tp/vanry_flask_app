@@ -5,11 +5,10 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-
+# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"
-
 
 # ---------- ROUTES ----------
 
@@ -19,24 +18,63 @@ def index():
 
 @app.route("/api/coins")
 def get_coins():
-    url = f"{COINGECKO_API}/coins/markets"
-    params = {
-        "vs_currency": "usd",
-        "order": "market_cap_desc",
-        "per_page": 50,
-        "page": 1,
-        "sparkline": "false"
-    }
-    response = requests.get(url, params=params)
-    return jsonify(response.json())
+    try:
+        # Fetch Vanry (vanar-chain) and USDT (tether) first
+        vanry_resp = requests.get(f"{COINGECKO_API}/coins/markets", params={
+            "vs_currency": "usd",
+            "ids": "vanar-chain",
+            "sparkline": "false"
+        })
+        vanry_resp.raise_for_status()
+        vanry_data = vanry_resp.json()
+
+        usdt_resp = requests.get(f"{COINGECKO_API}/coins/markets", params={
+            "vs_currency": "usd",
+            "ids": "tether",
+            "sparkline": "false"
+        })
+        usdt_resp.raise_for_status()
+        usdt_data = usdt_resp.json()
+
+        # Fetch top 50 coins by market cap
+        response = requests.get(f"{COINGECKO_API}/coins/markets", params={
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 50,
+            "page": 1,
+            "sparkline": "false"
+        })
+        response.raise_for_status()
+        coins = response.json()
+
+        # Remove Vanry and USDT if present in the main list
+        coins = [c for c in coins if c.get("id") not in ["vanar-chain", "tether"]]
+
+        # Insert Vanry and USDT at the top
+        if vanry_data:
+            coins.insert(0, vanry_data[0])
+        if usdt_data:
+            coins.insert(1, usdt_data[0])
+
+        return jsonify(coins)
+    except Exception as e:
+        print("Error fetching coins:", e)
+        return jsonify({"error": str(e)})
+
+
 
 @app.route("/api/coin/<coin_id>/chart")
 def get_coin_chart(coin_id):
-    days = request.args.get("days", 30)
-    url = f"{COINGECKO_API}/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": days}
-    response = requests.get(url, params=params)
-    return jsonify(response.json())
+    """Fetch historical chart data for a coin."""
+    try:
+        days = request.args.get("days", 30)
+        url = f"{COINGECKO_API}/coins/{coin_id}/market_chart"
+        params = {"vs_currency": "usd", "days": days}
+        response = requests.get(url, params=params, timeout=10)
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/opinion/<coin_id>")
 def get_coin_opinion(coin_id):
@@ -45,7 +83,7 @@ def get_coin_opinion(coin_id):
         # Fetch coin data first
         url = f"{COINGECKO_API}/coins/markets"
         params = {"vs_currency": "usd", "ids": coin_id}
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()[0]
 
         # Build prompt
@@ -62,7 +100,7 @@ def get_coin_opinion(coin_id):
 
         # Call OpenAI
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",  # Or "gpt-3.5-turbo"
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a financial assistant for crypto insights."},
                 {"role": "user", "content": prompt}
