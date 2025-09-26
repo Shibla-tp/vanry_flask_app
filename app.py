@@ -1,13 +1,15 @@
 from flask import Flask, jsonify, render_template, request
 import requests
-import openai
 import os
+from openai import OpenAI
 
 app = Flask(__name__)
 
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"
+
 
 # ---------- ROUTES ----------
 
@@ -59,7 +61,7 @@ def get_coin_opinion(coin_id):
         """
 
         # Call OpenAI
-        completion = openai.chat.completions.create(
+        completion = client.chat.completions.create(
             model="gpt-4o-mini",  # Or "gpt-3.5-turbo"
             messages=[
                 {"role": "system", "content": "You are a financial assistant for crypto insights."},
